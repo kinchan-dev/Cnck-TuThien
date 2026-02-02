@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import morgan from "morgan";
+
 import campaignRoutes from "./routes/campaign.routes.js";
 import donateRoutes from "./routes/donate.routes.js";
 
@@ -13,6 +14,7 @@ export function createApp() {
 
   app.get("/health", (req, res) => res.json({ ok: true }));
 
+  // ✅ mount routes
   app.use("/api", campaignRoutes);
   app.use("/api", donateRoutes);
 

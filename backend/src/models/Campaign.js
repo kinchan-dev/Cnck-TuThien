@@ -6,6 +6,7 @@ const CampaignSchema = new mongoose.Schema(
     description: { type: String, default: "" },
     targetAmount: { type: Number, required: true, min: 1 }, // VND
     totalRaised: { type: Number, default: 0, min: 0 },      // VND (off-chain total)
+    category: { type: String, default: "other", index: true },
     // store on-chain campaignId for mapping
     blockchainCampaignId: { type: Number, required: true, unique: true }
   },

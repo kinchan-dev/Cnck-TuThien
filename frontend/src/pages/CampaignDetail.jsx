@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { fetchCampaignDetail, fetchDonationsByCampaign } from "../services/api";
-import { formatVND, pct } from "../services/format";
-import ProgressBar from "../components/ProgressBar";
-import DonateModal from "../components/DonateModal";
-import { ETH_EXPLORER_BASE } from "../services/config";
+import ProgressBar from "../components/ProgressBar.jsx";
+import DonateModal from "../components/DonateModal.jsx";
+import TxTable from "../components/TxTable.jsx";
+import { api } from "../services/api.js";
+
+const formatVND = (n) => new Intl.NumberFormat("vi-VN").format(Number(n || 0)) + " đ";
+const pct = (raised, target) => (!target ? 0 : Math.round((Number(raised || 0) / Number(target)) * 100));
 
 export default function CampaignDetail() {
   const { id } = useParams();
-
   const [campaign, setCampaign] = useState(null);
   const [onchain, setOnchain] = useState(null);
   const [txs, setTxs] = useState([]);
@@ -16,147 +17,119 @@ export default function CampaignDetail() {
   const [err, setErr] = useState("");
   const [openDonate, setOpenDonate] = useState(false);
 
-  const percent = useMemo(() => {
-    if (!campaign) return 0;
-    return pct(campaign.totalRaised, campaign.targetAmount);
-  }, [campaign]);
-
-  const reload = async () => {
-    setErr("");
-    setLoading(true);
+  async function load() {
     try {
-      const detail = await fetchCampaignDetail(id);
-      setCampaign(detail.data);
-      setOnchain(detail.onchain);
+      setLoading(true);
+      setErr("");
+      const res = await api.get(`/campaign/${id}`);
+      setCampaign(res.data?.data);
+      setOnchain(res.data?.onchain || null);
 
-      const list = await fetchDonationsByCampaign(id);
-      setTxs(list);
+      const txRes = await api.get(`/campaign/${id}/transactions`);
+      setTxs(txRes.data?.data || []);
     } catch (e) {
-      setErr(e.response?.data?.message || e.message);
+      setErr(e?.response?.data?.message || e.message || "Load failed");
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   useEffect(() => {
-    reload();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    load();
   }, [id]);
 
-  if (loading) {
-    return <div className="max-w-6xl mx-auto px-4 py-10 text-white/70">Loading...</div>;
-  }
+  // ✅ Không render Navbar/Footer ở đây nữa
+  if (loading)
+    return (
+      <div className="mx-auto max-w-6xl px-4 py-10">
+        Đang tải...
+      </div>
+    );
 
-  if (err) {
-    return <div className="max-w-6xl mx-auto px-4 py-10 text-red-300">{err}</div>;
-  }
+  if (err)
+    return (
+      <div className="mx-auto max-w-6xl px-4 py-10 text-red-700">
+        Lỗi: {err}
+      </div>
+    );
+
+  if (!campaign) return null;
+
+  const progress = Math.min(100, Math.max(0, pct(campaign.totalRaised, campaign.targetAmount)));
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-10">
-      <div className="rounded-3xl border border-indigo-400/20 bg-white/5 p-6 md:p-8">
-        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-5">
-          <div>
-            <div className="text-2xl font-semibold">{campaign.name}</div>
-            <div className="text-white/60 mt-2">{campaign.description}</div>
-
-            <div className="mt-4 flex flex-wrap gap-2 text-xs">
-              <span className="px-2 py-1 rounded-lg bg-indigo-500/10 border border-indigo-400/20">
-                MongoID: {campaign._id}
-              </span>
-              <span className="px-2 py-1 rounded-lg bg-fuchsia-500/10 border border-fuchsia-400/20">
-                Chain CampaignID: #{campaign.blockchainCampaignId}
-              </span>
-              {onchain?.owner && (
-                <span className="px-2 py-1 rounded-lg bg-cyan-500/10 border border-cyan-400/20">
-                  On-chain Owner: {onchain.owner}
-                </span>
-              )}
+    <>
+      <section className="mx-auto max-w-6xl px-4 py-10">
+        <div className="flex flex-col md:flex-row gap-8">
+          <div className="flex-1">
+            <div className="text-xs inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 px-2 py-1">
+              ChainID: #{campaign.blockchainCampaignId}
             </div>
+
+            <h1 className="mt-3 text-3xl font-extrabold">{campaign.name}</h1>
+            <p className="mt-2 text-slate-600">{campaign.description || "—"}</p>
+
+            <div className="mt-6 rounded-2xl border border-slate-200 p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm text-slate-600">Đã quyên góp</div>
+                  <div className="text-2xl font-extrabold">{formatVND(campaign.totalRaised)}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-sm text-slate-600">Mục tiêu</div>
+                  <div className="text-xl font-bold">{formatVND(campaign.targetAmount)}</div>
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <ProgressBar value={progress} />
+              </div>
+
+              <button
+                onClick={() => setOpenDonate(true)}
+                className="mt-5 w-full rounded-xl bg-slate-900 text-white px-4 py-3 font-semibold hover:bg-slate-800"
+              >
+                Quyên góp
+              </button>
+            </div>
+
+            {onchain ? (
+              <div className="mt-6 rounded-2xl border border-slate-200 p-5">
+                <div className="font-bold">On-chain snapshot</div>
+                <div className="mt-2 text-sm text-slate-700 space-y-1">
+                  <div>
+                    <span className="text-slate-500">Owner:</span>{" "}
+                    <span className="font-mono">{onchain.owner}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Total Donations (VND):</span>{" "}
+                    {formatVND(onchain.totalDonations)}
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Donation Count:</span> {onchain.donationCount}
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
 
-          <button
-            onClick={() => setOpenDonate(true)}
-            className="px-5 py-3 rounded-2xl bg-gradient-to-r from-indigo-500 to-fuchsia-500 hover:opacity-90 shadow-neon"
-          >
-            Donate
-          </button>
-        </div>
-
-        <div className="mt-6 space-y-2">
-          <ProgressBar value={percent} />
-          <div className="flex items-center justify-between text-sm text-white/70">
-            <span>Raised (DB): <b className="text-white">{formatVND(campaign.totalRaised)}</b></span>
-            <span>Target: <b className="text-white">{formatVND(campaign.targetAmount)}</b></span>
-          </div>
-
-          {onchain && (
-            <div className="text-xs text-white/50 mt-2">
-              On-chain totalDonations: <b className="text-white">{formatVND(onchain.totalDonations)}</b> ·
-              donationCount: <b className="text-white">{onchain.donationCount}</b>
+          <div className="w-full md:w-[420px]">
+            <div className="rounded-2xl border border-slate-200 p-5">
+              <div className="font-bold">Lịch sử giao dịch</div>
+              <div className="mt-4">
+                <TxTable rows={txs} />
+              </div>
             </div>
-          )}
+          </div>
         </div>
-      </div>
-
-      <div className="mt-8 rounded-3xl border border-indigo-400/20 bg-white/5 p-6">
-        <div className="flex items-center justify-between">
-          <div className="text-lg font-semibold">Donation History</div>
-          <button
-            onClick={reload}
-            className="px-3 py-2 rounded-xl border border-indigo-400/25 bg-indigo-500/10 hover:bg-indigo-500/15 text-sm"
-          >
-            Refresh
-          </button>
-        </div>
-
-        <div className="mt-4 overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-white/60">
-              <tr className="border-b border-white/10">
-                <th className="text-left py-2 pr-3">Time</th>
-                <th className="text-left py-2 pr-3">Amount</th>
-                <th className="text-left py-2 pr-3">PaymentTxHash</th>
-                <th className="text-left py-2 pr-3">Blockchain Tx</th>
-              </tr>
-            </thead>
-            <tbody>
-              {txs.map((t) => (
-                <tr key={t._id} className="border-b border-white/5 hover:bg-white/5">
-                  <td className="py-3 pr-3 text-white/70">{new Date(t.createdAt).toLocaleString("vi-VN")}</td>
-                  <td className="py-3 pr-3">{formatVND(t.amountVND)}</td>
-                  <td className="py-3 pr-3 text-white/70">{t.paymentTxHash || "-"}</td>
-                  <td className="py-3 pr-3">
-                    <a
-                      className="text-indigo-300 hover:text-indigo-200 underline"
-                      href={`${ETH_EXPLORER_BASE}${t.blockchainTxHash}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {t.blockchainTxHash.slice(0, 10)}...
-                    </a>
-                  </td>
-                </tr>
-              ))}
-              {txs.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="py-6 text-center text-white/50">
-                    No donations yet.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      </section>
 
       <DonateModal
         open={openDonate}
-        onClose={() => {
-          setOpenDonate(false);
-          reload(); // refresh after donate
-        }}
-        campaign={campaign}
+        onClose={() => setOpenDonate(false)}
+        campaignId={campaign._id}
+        onSuccess={() => load()}
       />
-    </div>
+    </>
   );
 }

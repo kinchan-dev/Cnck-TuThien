@@ -15,7 +15,11 @@ export default function DonateModal({ open, onClose, campaignId, onSuccess }) {
       if (!Number.isFinite(n) || n <= 0) return setMsg("Số tiền không hợp lệ");
 
       setLoading(true);
-      const res = await api.post("/donate", { campaignId, amountVND: n });
+      const res = await api.post("/donate", {
+                          campaignMongoId: campaignId,    
+                          amountVND: Number(amountVND),     
+                          paymentTxHash: `mock-${Date.now()}`
+                        });
       setMsg("✅ Quyên góp thành công!");
       onSuccess?.(res.data);
       setTimeout(() => onClose?.(), 700);

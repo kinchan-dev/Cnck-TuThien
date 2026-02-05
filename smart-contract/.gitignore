@@ -1,20 +1,26 @@
-# Node modules
-/node_modules
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
 
-# Compilation output
-/dist
+# Secrets
+.env
+**/.env
 
-# pnpm deploy output
-/bundle
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
 
-# Hardhat Build Artifacts
-/artifacts
+# Frontend build
+dist/
+build/
 
-# Hardhat compilation (v2) support directory
-/cache
+# Hardhat
+smart-contract/artifacts/
+smart-contract/cache/
+smart-contract/ignition/
 
-# Typechain output
-/types
-
-# Hardhat coverage reports
-/coverage
+# Logs
+*.log

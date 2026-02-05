@@ -4,6 +4,8 @@ import morgan from "morgan";
 
 import campaignRoutes from "./routes/campaign.routes.js";
 import donateRoutes from "./routes/donate.routes.js";
+import authRoutes from "./routes/auth.routes.js";
+import adminRoutes from "./routes/admin.routes.js";
 
 export function createApp() {
   const app = express();
@@ -14,11 +16,12 @@ export function createApp() {
 
   app.get("/health", (req, res) => res.json({ ok: true }));
 
-  // ✅ mount routes
+  app.use("/api", authRoutes);
+  app.use("/api", adminRoutes);
+
   app.use("/api", campaignRoutes);
   app.use("/api", donateRoutes);
 
-  // basic error handler
   app.use((err, req, res, next) => {
     console.error(err);
     res.status(500).json({ ok: false, message: "Internal server error" });

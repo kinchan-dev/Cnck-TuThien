@@ -8,6 +8,9 @@ import CreateCampaign from "./pages/CreateCampaign.jsx";
 import About from "./pages/About.jsx";
 import HowItWorks from "./pages/HowItWorks.jsx";
 import Privacy from "./pages/Privacy.jsx";
+import Login from "./pages/Login.jsx";
+import Register from "./pages/Register.jsx";
+import AdminOrgs from "./pages/AdminOrgs.jsx";
 
 export const router = createBrowserRouter([
   {
@@ -21,6 +24,9 @@ export const router = createBrowserRouter([
       { path: "about", element: <About /> },
       { path: "how-it-works", element: <HowItWorks /> },
       { path: "privacy", element: <Privacy /> },
+      { path: "login", element: <Login /> },
+      { path: "register", element: <Register /> },
+      { path: "admin/orgs", element: <AdminOrgs /> },
     ],
   },
 ]);

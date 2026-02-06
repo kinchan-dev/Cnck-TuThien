@@ -3,67 +3,57 @@ pragma solidity ^0.8.20;
 
 /**
  * Transparent Charity
- * - Donations are recorded ON-CHAIN for transparency
- * - Actual money transfer is OFF-CHAIN (VND), verified by backend
+ * =========================================================
+ * Mục tiêu:
+ * 1) Minh bạch: ghi nhận (log) mọi khoản quyên góp lên blockchain
+ * 2) Tiền thật (VNĐ) chuyển OFF-CHAIN: xử lý bởi backend/cổng thanh toán
  *
- * Security model:
- * - contractOwner (deployer) sets backendRecorder
- * - backendRecorder is allowed to call recordDonation
- * - each campaign has its own owner who can withdraw the on-chain "recorded" value (logic only)
+ * Lưu ý quan trọng:
+ * - Contract KHÔNG giữ ETH / token / VNĐ
+ * - Số tiền "amount" ở đây chỉ là con số VNĐ được ghi nhận để audit
+ *
+ * Mô hình bảo mật:
+ * - owner (deployer) có quyền cấu hình backendRecorder
+ * - backendRecorder (ví backend) là ví DUY NHẤT được phép recordDonation
+ * - mỗi campaign có campaignOwner (người tạo) có thể gọi withdraw (chỉ mang tính logic/audit)
  */
 contract TransparentCharity {
-    // ====== Ownership (simple Ownable) ======
-    address public owner; // contract owner (deployer)
+    // =========================================================
+    // 1) OWNERSHIP / QUẢN TRỊ HỢP ĐỒNG
+    // =========================================================
 
+    /// @notice owner là chủ hợp đồng (người deploy). Có quyền setBackendRecorder.
+    address public owner;
+
+    /// @notice Modifier: chỉ owner mới được gọi hàm có gắn modifier này.
     modifier onlyOwner() {
         require(msg.sender == owner, "Only contract owner");
         _;
     }
 
-    // backend wallet allowed to record donations
+    // =========================================================
+    // 2) BACKEND RECORDER / VÍ BACKEND ĐƯỢC PHÉP GHI DONATION
+    // =========================================================
+
+    /**
+     * @notice backendRecorder là địa chỉ ví backend.
+     * Backend sẽ gọi recordDonation() sau khi xác nhận thanh toán VNĐ off-chain thành công.
+     */
     address public backendRecorder;
 
+    /// @notice Event: ghi nhận việc thay đổi backendRecorder (audit).
     event BackendRecorderUpdated(address indexed oldRecorder, address indexed newRecorder);
 
-    // ====== Campaign data ======
-    struct Campaign {
-        uint256 id;
-        address owner;          // campaign creator
-        string name;
-        uint256 targetAmount;   // VND unit (off-chain amount, just recorded)
-        uint256 totalDonations; // VND recorded total
-        bool exists;
+    /// @notice Modifier: chỉ backendRecorder mới được phép gọi hàm có gắn modifier này.
+    modifier onlyBackendRecorder() {
+        require(msg.sender == backendRecorder, "Only backend recorder");
+        _;
     }
 
-    // donation history per campaign (stored on-chain)
-    struct Donation {
-        uint256 amount;     // VND
-        string txHash;      // off-chain payment tx hash (VNPay/MoMo mock)
-        uint256 timestamp;
-    }
-
-    // campaignId => Campaign
-    mapping(uint256 => Campaign) private campaigns;
-
-    // campaignId => donationIndex => Donation
-    mapping(uint256 => mapping(uint256 => Donation)) private donations;
-
-    // campaignId => donationCount
-    mapping(uint256 => uint256) public donationCount;
-
-    uint256 public nextCampaignId = 1;
-
-    // ====== Events ======
-    event CampaignCreated(uint256 indexed campaignId, address indexed campaignOwner, string name, uint256 targetAmount);
-    event DonationRecorded(uint256 indexed campaignId, uint256 amount, string txHash, uint256 indexed donationIndex);
-    event Withdrawn(uint256 indexed campaignId, address indexed campaignOwner, uint256 amount);
-
-    constructor() {
-        owner = msg.sender;
-        backendRecorder = msg.sender; // default to deployer
-    }
-
-    // ====== Admin / backend config ======
+    /**
+     * @notice Owner set ví backendRecorder (đổi key backend / đổi server / môi trường).
+     * @param _recorder địa chỉ ví mới (không được là address(0))
+     */
     function setBackendRecorder(address _recorder) external onlyOwner {
         require(_recorder != address(0), "Invalid recorder");
         address old = backendRecorder;
@@ -71,12 +61,96 @@ contract TransparentCharity {
         emit BackendRecorderUpdated(old, _recorder);
     }
 
-    modifier onlyBackendRecorder() {
-        require(msg.sender == backendRecorder, "Only backend recorder");
-        _;
+    // =========================================================
+    // 3) DỮ LIỆU CAMPAIGN / THÔNG TIN CHIẾN DỊCH
+    // =========================================================
+
+    /**
+     * @notice Campaign lưu thông tin chiến dịch trên chain để ai cũng có thể kiểm chứng.
+     * - targetAmount, totalDonations là đơn vị VNĐ (chỉ ghi nhận, không chuyển tiền)
+     */
+    struct Campaign {
+        uint256 id;              // id chiến dịch (tăng dần)
+        address owner;           // người tạo chiến dịch (campaign owner)
+        string name;             // tên chiến dịch
+        uint256 targetAmount;    // mục tiêu VNĐ (chỉ để ghi nhận)
+        uint256 totalDonations;  // tổng VNĐ đã ghi nhận
+        bool exists;             // flag kiểm tra tồn tại
     }
 
-    // ====== Campaign functions ======
+    /**
+     * @notice Donation là 1 bản ghi quyên góp trên chain.
+     * - amount: số VNĐ được ghi nhận
+     * - txHash: mã giao dịch off-chain (VNPay/MoMo thật hoặc mock)
+     * - timestamp: thời gian ghi nhận trên chain
+     */
+    struct Donation {
+        uint256 amount;      // số VNĐ ghi nhận
+        string txHash;       // mã giao dịch off-chain
+        uint256 timestamp;   // block.timestamp lúc ghi nhận
+    }
+
+    /// @notice Mapping campaignId -> Campaign
+    mapping(uint256 => Campaign) private campaigns;
+
+    /// @notice Mapping campaignId -> donationIndex -> Donation (lưu lịch sử theo index)
+    mapping(uint256 => mapping(uint256 => Donation)) private donations;
+
+    /// @notice donationCount[campaignId] = số donation đã ghi cho campaign đó
+    mapping(uint256 => uint256) public donationCount;
+
+    /// @notice campaignId tăng dần, bắt đầu từ 1
+    uint256 public nextCampaignId = 1;
+
+    // =========================================================
+    // 4) EVENTS / SỰ KIỆN PHỤC VỤ AUDIT & FRONTEND LISTEN
+    // =========================================================
+
+    /// @notice Event: campaign được tạo
+    event CampaignCreated(
+        uint256 indexed campaignId,
+        address indexed campaignOwner,
+        string name,
+        uint256 targetAmount
+    );
+
+    /// @notice Event: donation được ghi nhận
+    event DonationRecorded(
+        uint256 indexed campaignId,
+        uint256 amount,
+        string txHash,
+        uint256 indexed donationIndex
+    );
+
+    /// @notice Event: withdraw logic (audit)
+    event Withdrawn(uint256 indexed campaignId, address indexed campaignOwner, uint256 amount);
+
+    // =========================================================
+    // 5) CONSTRUCTOR / KHỞI TẠO
+    // =========================================================
+
+    /**
+     * @notice Khi deploy:
+     * - owner = người deploy
+     * - backendRecorder mặc định = người deploy (demo). Thực tế nên set sang ví backend riêng.
+     */
+    constructor() {
+        owner = msg.sender;
+        backendRecorder = msg.sender;
+    }
+
+    // =========================================================
+    // 6) CHỨC NĂNG TẠO CAMPAIGN (ON-CHAIN)
+    // =========================================================
+
+    /**
+     * @notice Tạo chiến dịch quyên góp on-chain.
+     * @dev Trả về campaignId để backend lưu vào DB (blockchainCampaignId).
+     *
+     * @param name tên chiến dịch
+     * @param targetAmount mục tiêu VNĐ (chỉ ghi nhận)
+     * @return campaignId id chiến dịch vừa tạo
+     */
     function createCampaign(string calldata name, uint256 targetAmount) external returns (uint256) {
         require(bytes(name).length > 0, "Name required");
         require(targetAmount > 0, "Target must be > 0");
@@ -97,42 +171,57 @@ contract TransparentCharity {
         return campaignId;
     }
 
+    // =========================================================
+    // 7) CHỨC NĂNG GHI NHẬN DONATION (ON-CHAIN LOG)
+    // =========================================================
+
     /**
-     * recordDonation: called by backend after off-chain VND payment success
-     * - amount is in VND (integer)
-     * - txHash is off-chain payment transaction hash/id
+     * @notice Ghi nhận 1 donation sau khi thanh toán VNĐ off-chain thành công.
+     * @dev Chỉ backendRecorder được phép gọi để tránh user tự ghi fake donation.
+     *
+     * @param campaignId id campaign on-chain
+     * @param amount số VNĐ ghi nhận
+     * @param txHash mã giao dịch off-chain (VNPay/MoMo mock/real)
      */
-    function recordDonation(uint256 campaignId, uint256 amount, string calldata txHash)
-        external
-        onlyBackendRecorder
-    {
+    function recordDonation(
+        uint256 campaignId,
+        uint256 amount,
+        string calldata txHash
+    ) external onlyBackendRecorder {
         Campaign storage c = campaigns[campaignId];
         require(c.exists, "Campaign not found");
         require(amount > 0, "Amount must be > 0");
         require(bytes(txHash).length > 0, "txHash required");
 
-        // store donation
+        // idx là index donation hiện tại (0..donationCount-1)
         uint256 idx = donationCount[campaignId];
+
+        // lưu donation vào mapping để có thể đọc lại từng bản ghi
         donations[campaignId][idx] = Donation({
             amount: amount,
             txHash: txHash,
             timestamp: block.timestamp
         });
+
+        // tăng số lượng donation đã ghi
         donationCount[campaignId] = idx + 1;
 
-        // update total
+        // cập nhật tổng VNĐ đã ghi nhận
         c.totalDonations += amount;
 
+        // emit event để frontend/indexer có thể bắt và hiển thị
         emit DonationRecorded(campaignId, amount, txHash, idx);
     }
 
+    // =========================================================
+    // 8) WITHDRAW LOGIC (CHỈ MANG TÍNH MÔ PHỎNG/AUDIT)
+    // =========================================================
+
     /**
-     * withdraw: logical withdraw (since funds are off-chain)
-     * In real product you might:
-     * - replace this with an off-chain bank transfer workflow
-     * - or use stablecoin on-chain, etc.
+     * @notice "Withdraw" chỉ là logic audit vì tiền thật nằm off-chain.
+     * @dev Không chuyển ETH/token. Chỉ reset totalDonations về 0 và emit event.
      *
-     * Here we just emit event and reset campaign totalDonations to 0 for auditing.
+     * @param campaignId id campaign on-chain
      */
     function withdraw(uint256 campaignId) external {
         Campaign storage c = campaigns[campaignId];
@@ -141,11 +230,21 @@ contract TransparentCharity {
         require(c.totalDonations > 0, "Nothing to withdraw");
 
         uint256 amount = c.totalDonations;
+
+        // reset về 0 để đánh dấu "đã giải ngân" trong mô phỏng/audit
         c.totalDonations = 0;
 
         emit Withdrawn(campaignId, msg.sender, amount);
     }
 
+    // =========================================================
+    // 9) READ FUNCTIONS / HÀM ĐỌC DỮ LIỆU CHO FRONTEND
+    // =========================================================
+
+    /**
+     * @notice Lấy thông tin campaign + donationCount.
+     * @param campaignId id campaign on-chain
+     */
     function getCampaign(uint256 campaignId)
         external
         view
@@ -160,12 +259,16 @@ contract TransparentCharity {
     {
         Campaign storage c = campaigns[campaignId];
         require(c.exists, "Campaign not found");
+
         return (c.id, c.owner, c.name, c.targetAmount, c.totalDonations, donationCount[campaignId]);
     }
 
     /**
-     * getDonation: fetch a specific donation by index
-     * Frontend can page through donationCount and read each donation if needed.
+     * @notice Lấy 1 donation theo index.
+     * Frontend có thể loop từ 0..donationCount-1 để đọc từng donation.
+     *
+     * @param campaignId id campaign on-chain
+     * @param index chỉ số donation
      */
     function getDonation(uint256 campaignId, uint256 index)
         external
